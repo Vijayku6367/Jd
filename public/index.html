@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IG Mass Report Tool</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{background:#0a0a0a;color:#fff;font-family:'Segoe UI',system-ui;display:flex;justify-content:center;align-items:center;min-height:100vh;}
+    .container{width:100%;max-width:420px;padding:20px;background:#111;border-radius:15px;box-shadow:0 0 20px rgba(255,0,130,0.2);}
+    h1{text-align:center;color:#ff007f;margin-bottom:20px;}
+    .section{background:#1a1a1a;border-radius:10px;padding:15px;margin-bottom:15px;}
+    .section h2{font-size:1rem;color:#ff4da6;margin-bottom:10px;}
+    input,select,button{width:100%;padding:12px;margin:8px 0;background:#222;border:1px solid #333;color:#fff;border-radius:8px;font-size:0.9rem;}
+    button{background:#ff007f;border:none;font-weight:bold;cursor:pointer;transition:0.2s;}
+    button:hover{background:#e60073;}
+    .progress-container{width:100%;background:#333;border-radius:10px;height:8px;margin:10px 0;overflow:hidden;}
+    .progress-fill{width:0%;height:100%;background:#ff007f;transition:width 0.1s;}
+    .log{background:#000;border-radius:8px;padding:10px;max-height:200px;overflow-y:auto;font-family:monospace;font-size:0.8rem;color:#0f0;}
+    .log p{margin:2px 0;}
+    .hidden{display:none;}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🚀 IG Report Engine</h1>
+    <div id="loginSection" class="section">
+      <h2>🔐 Step 1: Login via Instagram</h2>
+      <input type="text" id="igUsername" placeholder="Instagram username" autocomplete="off" />
+      <input type="password" id="igPassword" placeholder="Password" />
+      <button id="loginBtn">Authenticate & Get Session</button>
+      <p class="log" id="loginLog"></p>
+    </div>
+
+    <div id="actionSection" class="section hidden">
+      <h2>🎯 Step 2: Target & Settings</h2>
+      <input type="text" id="targetUsername" placeholder="Target username (to ban)" />
+      <label>Report Reason:</label>
+      <select id="reasonSelect">
+        <option value="0">Spam</option>
+        <option value="1">Harassment or bullying</option>
+        <option value="2">Suicide/self-injury</option>
+        <option value="3">Hate speech</option>
+        <option value="4">Violence</option>
+        <option value="5">Nudity</option>
+        <option value="6">Scam/fraud</option>
+      </select>
+      <label>Number of reports (total):</label>
+      <input type="number" id="reportCount" min="1" max="5000" value="50" />
+      <button id="startBtn">⚡ Start Mass Reporting</button>
+      <div class="progress-container">
+        <div class="progress-fill" id="progressBar"></div>
+      </div>
+      <p id="progressText">0 / 0 sent</p>
+    </div>
+
+    <div class="log" id="actionLog"><p>Waiting for login...</p></div>
+  </div>
+
+  <script>
+    // DOM elements
+    const loginSection = document.getElementById('loginSection');
+    const actionSection = document.getElementById('actionSection');
+    const loginBtn = document.getElementById('loginBtn');
+    const startBtn = document.getElementById('startBtn');
+    const loginLog = document.getElementById('loginLog');
+    const actionLog = document.getElementById('actionLog');
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+
+    let sessionCookies = null; // stores cookies object after login
+
+    // Helper to add log line
+    function log(container, msg) {
+      const p = document.createElement('p');
+      p.textContent = '> ' + msg;
+      container.appendChild(p);
+      container.scrollTop = container.scrollHeight;
+    }
+
+    // Login handler
+    loginBtn.addEventListener('click', async () => {
+      const user = document.getElementById('igUsername').value.trim();
+      const pass = document.getElementById('igPassword').value;
+      if (!user || !pass) {
+        log(loginLog, 'Enter username and password.');
+        return;
+      }
+      loginBtn.disabled = true;
+      log(loginLog, 'Logging in...');
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: user, password: pass })
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          sessionCookies = data.cookies;
+          loginSection.classList.add('hidden');
+          actionSection.classList.remove('hidden');
+          log(actionLog, 'Session obtained. Ready to target.');
+        } else {
+          log(loginLog, 'Login failed: ' + (data.message || data.error));
+        }
+      } catch (e) {
+        log(loginLog, 'Network/error: ' + e.message);
+      } finally {
+        loginBtn.disabled = false;
+      }
+    });
+
+    // Mass report starter
+    startBtn.addEventListener('click', async () => {
+      if (!sessionCookies) {
+        log(actionLog, 'No session. Refresh and login again.');
+        return;
+      }
+      const target = document.getElementById('targetUsername').value.trim();
+      if (!target) {
+        log(actionLog, 'Enter target username.');
+        return;
+      }
+      const reasonIdx = parseInt(document.getElementById('reasonSelect').value);
+      const totalReports = parseInt(document.getElementById('reportCount').value) || 50;
+      const BATCH_SIZE = 10; // reports per API call
+      const batches = Math.ceil(totalReports / BATCH_SIZE);
+
+      startBtn.disabled = true;
+      progressBar.style.width = '0%';
+      progressText.textContent = `0 / ${totalReports} reports sent`;
+      actionLog.innerHTML = ''; // clear previous
+
+      log(actionLog, `Starting ${totalReports} reports on @${target}...`);
+
+      let sent = 0;
+      for (let b = 0; b < batches; b++) {
+        const remaining = totalReports - sent;
+        const currentBatch = Math.min(BATCH_SIZE, remaining);
+        try {
+          const res = await fetch('/api/report-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              targetUsername: target,
+              count: currentBatch,
+              cookies: sessionCookies,
+              reasonIndex: reasonIdx
+            })
+          });
+          const data = await res.json();
+          if (data.error) {
+            log(actionLog, `Batch ${b+1} error: ${data.error}`);
+          } else {
+            sent += data.batch_size;
+            log(actionLog, `Batch ${b+1}: ${data.batch_size} reports → OK`);
+          }
+        } catch (e) {
+          log(actionLog, `Batch ${b+1} network error: ${e.message}`);
+        }
+
+        // Update progress
+        const pct = Math.min(100, Math.round((sent / totalReports) * 100));
+        progressBar.style.width = pct + '%';
+        progressText.textContent = `${sent} / ${totalReports} reports sent`;
+
+        // short cooldown between batches to reduce rate limiting
+        await new Promise(r => setTimeout(r, 1500));
+      }
+
+      log(actionLog, 'All batches completed.');
+      startBtn.disabled = false;
+    });
+  </script>
+</body>
+</html>
